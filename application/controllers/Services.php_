@@ -1,0 +1,430 @@
+<?php if ( ! defined('BASEPATH')) exit('No direct script access allowed');
+/**
+ * ZYA CBT
+ * Achmad Lutfi
+ * achmdlutfi@gmail.com
+ * achmadlutfi.wordpress.com
+ */
+class Services extends CI_Controller {
+    
+    function __construct(){
+        header('Access-Control-Allow-Origin: *');
+        header("Access-Control-Allow-Methods: GET, OPTIONS, POST");
+        header("Access-Control-Allow-Headers: Content-Type");
+        header('Content-Type: application/json');
+        
+        parent:: __construct();
+        $this->load->library('access_tes');
+        $this->load->library('user_agent');
+        $this->load->model('cbt_user_model');
+        $this->load->model('cbt_user_grup_model');
+        $this->load->model('cbt_tes_model');
+        $this->load->model('cbt_tes_token_model');
+        $this->load->model('cbt_tes_topik_set_model');
+        $this->load->model('paket_pekerjaan_model');
+        $this->load->model('cbt_tes_user_model');
+        $this->load->model('cbt_tesgrup_model');
+        $this->load->model('cbt_soal_model');
+        $this->load->model('cbt_jawaban_model');
+        $this->load->model('cbt_tes_soal_model');
+        $this->load->model('cbt_tes_soal_jawaban_model');
+        $this->load->model('hsse_pass_model');
+        $this->load->model('trx_reward_model');
+        $this->load->model('trx_punishment_model');
+        
+        if(isset($_POST)){
+            $_POST = json_decode(file_get_contents("php://input"), true);
+        }
+    }
+    
+    function absen_pekerja_masuk($id,$id_paket_pekerjaan, $pic){
+        $data = array();
+        $query = $this->paket_pekerjaan_model->get_by_kolom_pekerja('id', $id);
+        $query2 = $this->paket_pekerjaan_model->get_by_kolom('paket_pekerjaan_id', $id_paket_pekerjaan);
+        if($query != null){
+            if($query2 != null){
+                $query3 = $this->paket_pekerjaan_model->get_count_pekerja_aktif_kolom($id_paket_pekerjaan, $id);
+                if($query3->row()->jml_pekerja > 0){
+                    $data['status'] = 0;
+                    $data['pesan'] = "Pekerja ".$query->row()->user_firstname." belum absen keluar";
+                }else{
+                    $this->db->trans_start();
+                    $data['paket_pekerjaan_id'] = $id_paket_pekerjaan;
+                    $data['cbt_user_id'] = $id;
+                    $data['jam_masuk'] = date("Y-m-d H:i:s");
+                    $data['pic_masuk'] = $pic;
+                    
+                    $masukId = $this->paket_pekerjaan_model->absen_masuk($data);
+                    $this->db->trans_complete();
+                    $data['status'] = 1;
+                    $data['pesan'] = "Absen Masuk : ".$data['jam_masuk'] ;
+                    $data['data']['Id Absen'] =  $masukId;
+                    $data['data']['Nama Pekerja'] =  $query->row()->user_firstname;
+                    $data['data']['Paket Pekerja'] =  $query2->row()->paket_pekerjaan_nama;
+                    $data['data']['Jam Masuk'] =  $data['jam_masuk'];
+                    
+                }
+            }else{
+                $data['status'] = 0;
+                $data['pesan'] = "Data Paket pekerjaan tidak ada";
+            }
+        }else{
+            $data['status'] = 0;
+            $data['pesan'] = "Data Pekerja tidak ada";
+            
+        }
+        echo json_encode($data);
+        redirect('/home/absen', 'refresh');
+    }
+    
+    function absen_pekerja_keluar($id,$id_paket_pekerjaan,$id_absen,$pic){
+        $data = array();
+        $query = $this->paket_pekerjaan_model->get_by_kolom_pekerja('id', $id);
+        $query2 = $this->paket_pekerjaan_model->get_by_kolom('paket_pekerjaan_id', $id_paket_pekerjaan);
+        if($query != null){
+            if($query2 != null){
+                $query3 = $this->paket_pekerjaan_model->get_count_pekerja_aktif_kolom($id_paket_pekerjaan, $id);
+                if($query3->row()->jml_pekerja > 0){
+                    $queryAbsen = $this->paket_pekerjaan_model->get_absen('paket_pekerjaan_pekerja_id', $id_absen);
+                    if($queryAbsen->row() != null){
+                        $this->db->trans_start();
+                        $jamMasuk = $queryAbsen->row()->jam_masuk;
+                        $jamKeluar = date("Y-m-d H:i:s");
+                        $diff = strtotime($jamKeluar) - strtotime($jamMasuk);
+                        $data['paket_pekerjaan_id'] = $id_paket_pekerjaan;
+                        $data['cbt_user_id'] = $id;
+                        $data['jam_keluar'] = $jamKeluar;
+                        $data['detik_aktif'] = floor($diff);
+                        $data['pic_keluar'] = $pic;
+                        
+                        $this->paket_pekerjaan_model->absen_keluar($id_absen, $data);
+                        $this->db->trans_complete();
+                        $data['status'] = 1;
+                        $data['pesan'] = "Absen Keluar : ".$data['jam_keluar'] ;
+                        $data['data']['Nama Pekerja'] =  $query->row()->user_firstname;
+                        $data['data']['Paket Pekerja'] =  $query2->row()->paket_pekerjaan_nama;
+                        $data['data']['Jam Masuk'] =  $queryAbsen->row()->jam_masuk;
+                        $data['data']['Jam Keluar'] =  $data['jam_keluar'];
+                    }else{
+                        $data['status'] = 0;
+                        $data['pesan'] = "Data Absen pekerja tidak ada";
+                    }
+                }else{
+                    $data['status'] = 0;
+                    $data['pesan'] = "Pekerja ".$query->row()->user_firstname." sudah absen keluar";
+                    
+                }
+            }else{
+                $data['status'] = 0;
+                $data['pesan'] = "Data Paket pekerjaan tidak ada";
+            }
+        }else{
+            $data['status'] = 0;
+            $data['pesan'] = "Data Pekerja tidak ada";
+            
+        }
+        
+        echo json_encode($data);
+        redirect('/home/absen', 'refresh');
+    }
+    function profile($id){
+        $query = $this->cbt_user_model->get_by_column_lengkap('cbt_user.id', $id);
+        if($query->num_rows()>0){
+            $data = $query->row();
+            $data->foto = base_url()."uploads/photos/".$data->foto;
+            $status['status'] = 1;
+            $status['result'] = $data;
+        }else{
+            $status['status'] = 0;
+            $status['result'] = "Data tidak ada";
+        }
+        echo json_encode($status);
+    }
+    
+    function get_pass($pass){
+        
+        $query = $this->cbt_user_model->get_by_column_lengkap('cbt_user.nomor_pass', $pass);
+        if($query->num_rows()>0){
+            $data = $query->row();
+            $data->foto = base_url()."uploads/photos/".$data->foto;
+            $id = $data->id;
+            $data = (array)$data;
+            $now = time();
+            
+            $queryReward = $this->trx_reward_model->get_datatable(0, 500, 'a.nomor_pass', $pass);
+            $queryPunishment = $this->trx_punishment_model->get_datatable(0, 500, 'a.nomor_pass', $pass);
+            $hhsepass = $this->hsse_pass_model->get_by_kolom_limit('user_id', $id, 1)->row();
+            $tanggal_awal = date('Y-m-d H:i', strtotime("- 6 days", strtotime($hhsepass->date_created)));
+            $tanggal_akhir = date('Y-m-d H:i', strtotime('+ 1 days'));
+            $statusHsse = ($now <= strtotime($hhsepass->date_expired)) ? 1 : 0;
+            $statusAbsen = 1;
+            
+            $hhsepass->date_created = date("j M Y",strtotime($hhsepass->date_created));
+            $hhsepass->date_expired = date("j M Y",strtotime($hhsepass->date_expired));
+            $hhsepass = (array)$hhsepass;
+            $hhsepass['statusvalid'] = $statusHsse;
+            $hhsepass = (object)$hhsepass;
+            
+            $tanggal = array($tanggal_awal,$tanggal_akhir);
+            
+            $queryNilai = $this->cbt_tes_user_model->get_datatable(0, 50, 'semua', 'semua', 'tertinggi', $tanggal, $id);
+            
+            $data['hsse_pass'] = $hhsepass;
+            $data['hasil_tes'] = $queryNilai->result();
+            if($queryReward->result() != null){
+                $d = $queryReward->result();
+                $r = array();
+                $query_m_reward = $this->trx_reward_model->get_master_reward();
+                $query_m_reward = $query_m_reward->result();
+                foreach ($query_m_reward as $temp_reward) {
+                    $r[$temp_reward->reward_id] = $temp_reward->name;
+                }
+                
+                foreach ($d as $dt){
+                    $exp = explode(",", $dt->reward);
+                    $string = array();
+                    foreach($exp as $e){
+                        $string[]= $r[$e];
+                    }
+                    $dt->tgl_validasi = date("j M Y",strtotime($dt->tgl_validasi));
+                    $dt->reward = implode(",",$string);
+                }
+            }
+            $resultPunishment = array(); 
+            if($queryPunishment->result() != null){
+                $dp = $queryPunishment->result();
+                $punishment = array();
+                $query_m_punishment = $this->trx_punishment_model->get_master_punishment();
+                $query_m_punishment = $query_m_punishment->result();
+                foreach ($query_m_punishment as $temp_punishment) {
+                    $punishment[$temp_punishment->punishment_id] = $temp_punishment->name;
+                }
+                
+                $resultPunishment = array();
+                foreach ($dp as $dt){
+                    $exp = explode(",", $dt->punishment);
+                    $string = array();
+                    foreach($exp as $e){
+                        $string[]= $punishment[$e];
+                    }
+                    $dt->punishment_date_start = date("j M Y",strtotime($dt->punishment_date_start));
+                    $dt->punishment_date_end = date("j M Y",strtotime($dt->punishment_date_end));
+                    $dt->punishment = implode(",",$string);
+                    $statusPunnishment = ($now <= strtotime($dt->punishment_date_end)) ? 1 : 0;
+                    $dt = (array)$dt;
+                    $dt['statusvalid'] = $statusPunnishment;
+                    $dt = (object)$dt;
+                    if($dt->level == 3 && $statusPunnishment == 1){
+                        $statusAbsen = 0;
+                    }
+                    array_push($resultPunishment,$dt);
+                }
+            }
+            $data['reward'] = $queryReward->result();
+            $data['punishment'] = $resultPunishment;
+            $data['is_absen'] = $statusAbsen;
+            $status['status'] = 1;
+            $status['result'] = $data;
+        }else{
+            $status['status'] = 0;
+            $status['result'] = "Data tidak ada";
+        }
+        echo json_encode($status);
+    }
+    
+    function get_detail_satuan_kerja($idPaket){
+        $query = $this->paket_pekerjaan_model->get_by_kolom('paket_pekerjaan_id', $idPaket);
+        if($query->num_rows() > 0){
+            $data = $query->row();
+            $dataPekerja = $this->paket_pekerjaan_model->get_pekerja_aktif($idPaket, 0, 500, "cbt_user.user_firstname", $isi = "");
+            $data = (array)$data;
+            $data['dataPegawai']= null;
+            $data = (object)$data;
+            $data->dataPegawai = $dataPekerja->result();
+            
+            $status['status'] = 1;
+            $status['result']= $data;
+        }else{
+            $status['status'] = 0;
+            $status['result']= "Data Tidak ada";
+        }
+        echo json_encode($status);
+    }
+    
+    function get_satuan_kerja(){
+        if(isset($_GET['idDivisi'])){
+            if(strpos($_GET['idDivisi'],'PMD') !== true || strpos($_GET['idDivisi'],'PIM') !== true || strpos($_GET['idDivisi'],'PSD') !== true)
+                $idDivisi = '';
+                else
+                    $idDivisi = trim($_GET['idDivisi']);
+        }else{
+            $idDivisi = '';
+        }
+        if(isset($_GET['page'])){
+            $page = $_GET['page'];
+        }else{
+            $page = 1;
+        }
+        
+        $qtotal = $this->paket_pekerjaan_model->get_datatable_count('paket_pekerjaan_alamat', $idDivisi)->result();
+        $totalData = $qtotal[0]->hasil;
+        
+        $perPage = 50;
+        $lastPage = intval($totalData / $perPage);
+        
+        $start = ($page ==  1 ? 0 : ($perPage * $page - $perPage));
+        $end = $perPage * $page;
+        
+        $query_pekerjaan = $this->paket_pekerjaan_model->get_datatable($start, $end, 'paket_pekerjaan_alamat', $idDivisi);
+        
+        
+        if($totalData>0){
+            $query_divisi = $query_pekerjaan->result();
+            $status['status'] = 1;
+            $status['result']['total'] = $totalData;
+            $status['result']['last_page'] = $lastPage;
+            $status['result']['current_page'] = $page;
+            $status['result']['data'] = $query_divisi;
+        }else{
+            $status['status'] = 1;
+            $status['result']['total'] = $totalData;
+            $status['result']['last_page'] = $lastPage;
+            $status['result']['current_page'] = $page;
+            $status['result']['data'] = [];
+        }
+        echo json_encode($status);
+    }
+    
+    function get_list_pekerja_aktif(){
+        if(isset($_GET['id'])){
+            $id = trim($_GET['id']);
+        }else{
+            $id = '';
+        }
+        if(isset($_GET['page'])){
+            $page = $_GET['page'];
+        }else{
+            $page = 1;
+        }
+        
+        $qtotal = $this->paket_pekerjaan_model->get_count_pekerja_aktif($id, $kolom = "cbt_user.user_firstname", $isi = "")->result();
+        $totalData = $qtotal[0]->jml_pekerja;
+        
+        $perPage = 50;
+        $lastPage = intval($totalData / $perPage);
+        
+        $start = ($page ==  1 ? 0 : ($perPage * $page - $perPage));
+        $end = $perPage * $page;
+        
+        $query_pekerjaan = $this->paket_pekerjaan_model->get_pekerja_aktif($id, $start=0, $rows=1000, $kolom = "cbt_user.user_firstname", $isi = "");
+        
+        
+        if($totalData>0){
+            $query_divisi = $query_pekerjaan->result();
+            $status['status'] = 1;
+            $status['result']['total'] = $totalData;
+            $status['result']['last_page'] = $lastPage;
+            $status['result']['current_page'] = $page;
+            $status['result']['data'] = $query_divisi;
+        }else{
+            $status['status'] = 1;
+            $status['result']['total'] = $totalData;
+            $status['result']['last_page'] = $lastPage;
+            $status['result']['current_page'] = $page;
+            $status['result']['data'] = [];
+        }
+        echo json_encode($status);
+    }
+    function get_pekerja_aktif(){
+        if(isset($_GET['idDivisi'])){
+            if(strpos($_GET['idDivisi'],'PMD') !== true || strpos($_GET['idDivisi'],'PIM') !== true || strpos($_GET['idDivisi'],'PSD') !== true)
+                $idDivisi = '';
+                else
+                    $idDivisi = trim($_GET['idDivisi']);
+        }else{
+            $isi = '';
+        }
+        if(isset($_GET['page'])){
+            $page = $_GET['page'];
+        }else{
+            $page = 1;
+        }
+        
+        $qtotal = $this->paket_pekerjaan_model->get_count_paket_aktif($kolom = "paket_pekerjaan_pekerja.pic_masuk", $isi = "")->result();
+        $totalData = $qtotal[0]->hasil;
+        
+        $perPage = 50;
+        $lastPage = intval($totalData / $perPage);
+        
+        $start = ($page ==  1 ? 0 : ($perPage * $page - $perPage));
+        $end = $perPage * $page;
+        
+        $query_pekerjaan = $this->paket_pekerjaan_model->get_paket_aktif($start=0, $rows=1000, $kolom = "paket_pekerjaan_pekerja.pic_masuk", $isi = "");
+        
+        
+        if($totalData>0){
+            $query_divisi = $query_pekerjaan->result();
+            $status['status'] = 1;
+            $status['result']['total'] = $totalData;
+            $status['result']['last_page'] = $lastPage;
+            $status['result']['current_page'] = $page;
+            $status['result']['data'] = $query_divisi;
+        }else{
+            $status['status'] = 1;
+            $status['result']['total'] = $totalData;
+            $status['result']['last_page'] = $lastPage;
+            $status['result']['current_page'] = $page;
+            $status['result']['data'] = [];
+        }
+        echo json_encode($status);
+    }
+    
+    function login(){
+        $this->load->library('form_validation');
+        
+        $this->form_validation->set_rules('username', 'Username','required|strip_tags');
+        $this->form_validation->set_rules('password', 'Password','required|strip_tags');
+        if($this->form_validation->run() == TRUE){
+            $this->form_validation->set_rules('token','token','callback_check_login');
+            if($this->form_validation->run() == FALSE){
+                //Jika login gagal
+                $status['status'] = 0;
+                $status['result'] = validation_errors();
+            }else{
+                //Jika sukses
+                $dataLogin = $this->session->userdata();
+                $query = $this->cbt_user_model->get_by_column_lengkap('cbt_user.id', $dataLogin['idUser']);
+                
+                if($query->num_rows()>0){
+                    $data = $query->row();
+                    $data->foto = base_url()."uploads/photos/".$data->foto;
+                }
+                $status['status'] = 1;
+                $status['result'] = $data;
+            }
+        }else{
+            $status['status'] = 0;
+            $status['result'] = validation_errors();
+        }
+        echo json_encode($status);
+    }
+    
+    
+    function check_login(){
+        $username = $this->input->post('username',TRUE);
+        $password = $this->input->post('password',TRUE);
+        
+        $login = $this->access_tes->login($username, $password, $this->input->ip_address());
+        if($login==1){
+            $this->access->login($username, $password, $this->input->ip_address());
+            return TRUE;
+        }else if($login==2){
+            $this->form_validation->set_message('check_login','Password yang dimasukkan salah');
+            return FALSE;
+        }else{
+            $this->form_validation->set_message('check_login','Username yang dimasukkan tidak dikenal');
+            return FALSE;
+        }
+    }
+}
+
